@@ -1,118 +1,552 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Chess vs Bots</title>
-  <style>
-    body { display: flex; flex-direction: column; align-items: center; font-family: Arial; }
-    #board { display: grid; grid-template-columns: repeat(8, 60px); grid-template-rows: repeat(8, 60px); }
-    .square { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 36px; cursor: pointer; }
-    .light { background: #f0d9b5; }
-    .dark { background: #b58863; }
-    #controls { margin: 10px; }
-    select { padding: 5px; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Chess vs Bots (400–2900)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root{--light:#f0d9b5;--dark:#b58863;--accent:#2b6cb0}
+  *{box-sizing:border-box;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+  body{margin:18px;display:flex;gap:18px;align-items:flex-start;justify-content:center;background:#f7fafc;color:#111}
+  .panel{background:#fff;border-radius:10px;box-shadow:0 6px 18px rgba(15,23,42,0.08);padding:14px;width:420px}
+  h1{margin:0 0 12px;font-size:18px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  select,input[type="radio"]{padding:6px;border-radius:6px;border:1px solid #e2e8f0}
+  button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+  button.secondary{background:#edf2f7;color:#111}
+  #status{margin-top:8px;font-size:13px;color:#334155}
+
+  /* board */
+  .board-wrap{display:grid;grid-template-columns: 480px 220px; gap:18px}
+  .board{display:grid;grid-template-columns:repeat(8,60px);grid-template-rows:repeat(8,60px);border-radius:8px;overflow:hidden;box-shadow:0 6px 14px rgba(2,6,23,0.06)}
+  .square{width:60px;height:60px;display:flex;align-items:center;justify-content:center;font-size:34px;user-select:none;cursor:pointer;position:relative}
+  .light{background:var(--light)}
+  .dark{background:var(--dark)}
+  .square.selected{outline:3px solid rgba(255,215,0,0.95);z-index:2}
+  .square.legal::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;background:rgba(34,197,94,0.85);opacity:0.95}
+  .square.legal.capture::after{background:rgba(239,68,68,0.95);width:36px;height:36px;border-radius:6px;top:12px}
+  .sidebar{background:#fff;border-radius:10px;padding:12px;box-shadow:0 6px 18px rgba(15,23,42,0.04)}
+  .moves{max-height:420px;overflow:auto;font-size:13px;padding:8px;border-radius:6px;border:1px dashed #e6eef9}
+  .moves .move{padding:6px;border-bottom:1px solid #f1f5f9}
+  .footer{margin-top:10px;font-size:13px;color:#475569}
+  .small{font-size:13px;color:#64748b}
+  .flex{display:flex;gap:8px;align-items:center}
+  label{font-size:13px}
+  .info{padding:8px;background:#f8fafc;border-radius:6px;margin-top:8px;font-size:13px}
+</style>
 </head>
 <body>
-  <h2>Play Chess vs Bot</h2>
-  <div id="controls">
-    <label for="bot">Choose Bot:</label>
-    <select id="bot" onchange="setBot(this.value)">
+
+<div class="panel">
+  <h1>Chess — Play vs Bot (400 → 2900)</h1>
+
+  <div class="controls">
+    <label for="botRating">Bot rating</label>
+    <select id="botRating">
       <option value="400">Bot 400</option>
       <option value="800">Bot 800</option>
       <option value="1200">Bot 1200</option>
       <option value="1600">Bot 1600</option>
       <option value="2000">Bot 2000</option>
       <option value="2400">Bot 2400</option>
-      <option value="2900">Bot 2900</option>
+      <option value="2900" selected>Bot 2900</option>
     </select>
+
+    <div class="flex">
+      <label><input type="radio" name="side" value="w" checked> Play White</label>
+      <label><input type="radio" name="side" value="b"> Play Black</label>
+    </div>
+
+    <button id="newBtn">New Game</button>
+    <button id="flipBtn" class="secondary">Flip Board</button>
   </div>
-  <div id="board"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js"></script>
-  <script>
-    const boardDiv = document.getElementById("board");
-    const game = new Chess();
-    let selectedSquare = null;
-    let botRating = 400;
+  <div id="status" class="small">Ready — choose a bot and click <strong>New Game</strong>.</div>
+  <div class="info small">Controls: click a piece to select, then click destination. Promotions auto-queen.</div>
+</div>
 
-    // Stockfish web worker
-    const stockfish = new Worker("https://lichess1.org/assets/_nJf7R/stockfish.wasm.js");
+<div class="board-wrap">
+  <div id="board" class="board" role="grid" aria-label="Chessboard"></div>
 
-    function setBot(rating) {
-      botRating = parseInt(rating);
-      alert("You are playing against Bot " + botRating);
+  <div class="sidebar panel">
+    <h2 style="font-size:14px;margin:0 0 8px">Game info</h2>
+    <div class="small"><strong>Current turn:</strong> <span id="turnSpan">-</span></div>
+    <div class="small"><strong>Bot:</strong> <span id="botSpan">-</span></div>
+    <div id="thinking" class="small" style="margin-top:8px;color:#7c3aed"></div>
+
+    <h3 style="font-size:13px;margin:12px 0 6px">Move list</h3>
+    <div class="moves" id="moves"></div>
+
+    <div style="margin-top:10px" class="flex">
+      <button id="undoBtn" class="secondary">Undo (1 ply)</button>
+      <button id="resignBtn" class="secondary">Resign</button>
+    </div>
+    <div class="footer small">Engine runs in a background worker. No external server needed.</div>
+  </div>
+</div>
+
+<!-- chess.js for rules -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js"></script>
+
+<script>
+/*
+  Chess vs Bots (400-2900)
+  - Uses chess.js for legal moves/state
+  - Uses an inline worker for AI (minimax + alpha-beta)
+  - Bot strength simulated by search depth + randomness mapped to Elo
+*/
+
+// Unicode piece symbols
+const PIECE_SYMBOLS = {
+  'p_white':'♙','r_white':'♖','n_white':'♘','b_white':'♗','q_white':'♕','k_white':'♔',
+  'p_black':'♟','r_black':'♜','n_black':'♞','b_black':'♝','q_black':'♛','k_black':'♚'
+};
+
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+const botSpan = document.getElementById('botSpan');
+const turnSpan = document.getElementById('turnSpan');
+const thinkingEl = document.getElementById('thinking');
+const movesEl = document.getElementById('moves');
+
+const botSelect = document.getElementById('botRating');
+const newBtn = document.getElementById('newBtn');
+const flipBtn = document.getElementById('flipBtn');
+const undoBtn = document.getElementById('undoBtn');
+const resignBtn = document.getElementById('resignBtn');
+
+let orientationWhite = true; // flip board
+let selectedSquare = null;
+let legalTargets = [];
+let playerColor = 'w'; // 'w' or 'b'
+let engineWorker = null;
+
+const game = new Chess();
+
+function createBoardElements() {
+  boardEl.innerHTML = '';
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const sq = document.createElement('div');
+      sq.className = 'square';
+      sq.dataset.row = r;
+      sq.dataset.col = c;
+      sq.dataset.square = coordsToSquare(r,c);
+      sq.addEventListener('click', onSquareClick);
+      boardEl.appendChild(sq);
     }
+  }
+}
 
-    function drawBoard() {
-      boardDiv.innerHTML = "";
-      const board = game.board();
-      board.forEach((row, r) => {
-        row.forEach((piece, c) => {
-          const square = document.createElement("div");
-          square.className = "square " + ((r + c) % 2 ? "dark" : "light");
-          square.dataset.row = r;
-          square.dataset.col = c;
-          if (piece) {
-            square.textContent = piece.type.toUpperCase();
-            if (piece.color === "b") square.style.color = "black";
-            else square.style.color = "white";
-          }
-          boardDiv.appendChild(square);
-        });
+function coordsToSquare(row, col) {
+  // row 0 is top (rank 8)
+  const file = 'abcdefgh'[col];
+  const rank = 8 - row;
+  return file + rank;
+}
+function squareToCoords(sq) {
+  const file = sq[0]; const rank = parseInt(sq[1],10);
+  const col = 'abcdefgh'.indexOf(file);
+  const row = 8 - rank;
+  return {row, col};
+}
+
+// draw pieces
+function drawBoard() {
+  // board() returns array rank8 -> rank1
+  const board = game.board();
+  const sqs = [...boardEl.children];
+  for (let r=0; r<8; r++){
+    for (let c=0; c<8; c++){
+      const idx = r*8 + c;
+      const el = sqs[idx];
+      // color square
+      const isDark = (r + c) % 2 === 1;
+      el.classList.toggle('light', !isDark);
+      el.classList.toggle('dark', isDark);
+      // piece
+      const p = board[r][c];
+      el.innerHTML = '';
+      el.classList.remove('selected','legal','capture');
+      if (p) {
+        const key = p.type + '_' + (p.color === 'w' ? 'white' : 'black');
+        const sym = PIECE_SYMBOLS[key];
+        const span = document.createElement('div');
+        span.textContent = sym;
+        span.style.fontSize = '34px';
+        el.appendChild(span);
+      }
+      // set data-square attribute (in case orientation toggled later)
+      el.dataset.square = coordsToSquare(r,c);
+    }
+  }
+  // if orientation flipped, we will rearrange visually by reversing child order
+  if (!orientationWhite) {
+    // reverse display order by appending children in reverse
+    const nodes = Array.from(boardEl.children).reverse();
+    boardEl.innerHTML = '';
+    nodes.forEach(n => boardEl.appendChild(n));
+  }
+  // update status
+  const turn = game.turn() === 'w' ? 'White' : 'Black';
+  turnSpan.textContent = turn;
+  botSpan.textContent = botSelect.value;
+  updateMoves();
+}
+
+// highlight selected square and legal moves
+function highlightFrom(square) {
+  clearHighlights();
+  selectedSquare = square;
+  // add selected class to that square element
+  const el = findSquareEl(square);
+  if (el) el.classList.add('selected');
+  // legal moves from this square
+  const moves = game.moves({ square: square, verbose: true });
+  legalTargets = moves.map(m => ({to: m.to, capture: !!m.captured}));
+  legalTargets.forEach(t => {
+    const targetEl = findSquareEl(t.to);
+    if (targetEl) {
+      targetEl.classList.add('legal');
+      if (t.capture) targetEl.classList.add('capture');
+    }
+  });
+}
+
+function clearHighlights() {
+  selectedSquare = null;
+  legalTargets = [];
+  boardEl.querySelectorAll('.square').forEach(s => {
+    s.classList.remove('selected','legal','capture');
+  });
+}
+
+function findSquareEl(square) {
+  // find child with data-square matching (orientation may reverse order)
+  return Array.from(boardEl.children).find(ch => ch.dataset.square === square);
+}
+
+function onSquareClick(e) {
+  const sq = e.currentTarget.dataset.square;
+  if (!sq) return;
+  // if no selection yet
+  if (!selectedSquare) {
+    // only allow selecting pieces of player's color
+    const piece = game.get(sq);
+    if (piece && piece.color === playerColor) {
+      highlightFrom(sq);
+    }
+    return;
+  }
+  // if clicked the same square => deselect
+  if (sq === selectedSquare) { clearHighlights(); return; }
+
+  // if clicked a legal target -> attempt move
+  const isLegal = legalTargets.some(t => t.to === sq);
+  if (isLegal) {
+    makePlayerMove(selectedSquare, sq);
+    clearHighlights();
+  } else {
+    // if clicked another of player's pieces -> select new
+    const piece = game.get(sq);
+    if (piece && piece.color === playerColor) {
+      highlightFrom(sq);
+      return;
+    }
+    // otherwise clear selection
+    clearHighlights();
+  }
+}
+
+function makePlayerMove(from, to) {
+  // try move with auto-queen promotion
+  const move = game.move({ from, to, promotion: 'q' });
+  if (!move) {
+    statusEl.textContent = 'Illegal move';
+    return;
+  }
+  drawBoard();
+  statusEl.textContent = `You played ${move.san}`;
+  checkGameOver();
+  // if after player's move it's engine turn, trigger engine
+  if (!game.game_over() && game.turn() !== playerColor) {
+    runEngine();
+  }
+}
+
+function applyEngineMove(moveStr) {
+  if (!moveStr) return;
+  // moveStr like 'e2e4' or 'e7e8q'
+  const from = moveStr.slice(0,2);
+  const to = moveStr.slice(2,4);
+  const promotion = moveStr.length > 4 ? moveStr.slice(4) : undefined;
+  const mv = game.move({ from, to, promotion: promotion || 'q' });
+  if (!mv) {
+    console.warn('Engine proposed illegal move:', moveStr);
+    // fallback: pick a random legal move
+    const moves = game.moves();
+    if (moves.length) {
+      game.move(moves[Math.floor(Math.random()*moves.length)]);
+    }
+  } else {
+    statusEl.textContent = `Engine played ${mv.san}`;
+  }
+  drawBoard();
+  checkGameOver();
+}
+
+function updateMoves() {
+  movesEl.innerHTML = '';
+  const history = game.history({ verbose: true });
+  // display as move pairs
+  for (let i = 0; i < history.length; i += 2) {
+    const moveWhite = history[i] ? history[i].san : '';
+    const moveBlack = history[i+1] ? history[i+1].san : '';
+    const div = document.createElement('div');
+    div.className = 'move';
+    const num = Math.floor(i/2) + 1;
+    div.innerHTML = `<strong>${num}.</strong> ${moveWhite} &nbsp;&nbsp; ${moveBlack}`;
+    movesEl.appendChild(div);
+  }
+  movesEl.scrollTop = movesEl.scrollHeight;
+}
+
+// engine worker creation (inline blob)
+function createEngineWorker() {
+  if (engineWorker) {
+    engineWorker.terminate();
+    engineWorker = null;
+  }
+  const code = `
+
+  // worker script: loads chess.js and runs a minimax engine (alpha-beta) on the given FEN
+  importScripts('https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js');
+
+  const PIECE_VALUES = { p:100, n:320, b:330, r:500, q:900, k:20000 };
+
+  function evaluateMaterial(chess) {
+    const board = chess.board();
+    let score = 0;
+    for (let r=0;r<8;r++){
+      for (let c=0;c<8;c++){
+        const p = board[r][c];
+        if (p) {
+          score += (p.color === 'w' ? 1 : -1) * (PIECE_VALUES[p.type] || 0);
+        }
+      }
+    }
+    // small mobility bonus
+    const mobility = chess.moves().length;
+    score += mobility * 8 * (chess.turn() === 'w' ? 1 : -1);
+    return score;
+  }
+
+  // mapping rating to depth + randomness probability
+  function getParams(rating) {
+    if (rating <= 400) return { depth:1, rand:0.80 };
+    if (rating <= 800) return { depth:1, rand:0.60 };
+    if (rating <= 1200) return { depth:2, rand:0.35 };
+    if (rating <= 1600) return { depth:3, rand:0.18 };
+    if (rating <= 2000) return { depth:4, rand:0.08 };
+    if (rating <= 2400) return { depth:5, rand:0.03 };
+    return { depth:5, rand:0.01 };
+  }
+
+  self.onmessage = function(e) {
+    const data = e.data;
+    if (data.cmd === 'go') {
+      const fen = data.fen;
+      const rating = data.rating;
+      const chess = new Chess(fen);
+      const params = getParams(rating);
+      const moves = chess.moves({ verbose:true });
+      if (moves.length === 0) {
+        postMessage({ bestMove: null, nodes: 0 });
+        return;
+      }
+      // random quick move with some probability (to simulate weaker play)
+      if (Math.random() < params.rand) {
+        const mv = moves[Math.floor(Math.random() * moves.length)];
+        postMessage({ bestMove: mv.from + mv.to + (mv.promotion || ''), nodes: 1 });
+        return;
+      }
+
+      // order moves: captures first
+      moves.sort((a,b) => {
+        const va = a.captured ? (PIECE_VALUES[a.captured] || 0) : 0;
+        const vb = b.captured ? (PIECE_VALUES[b.captured] || 0) : 0;
+        return vb - va;
       });
-    }
 
-    function playerMove(from, to) {
-      const move = game.move({ from, to, promotion: "q" });
-      if (move) {
-        drawBoard();
-        setTimeout(computerMove, 500);
+      let nodes = 0;
+      const engineColor = chess.turn(); // 'w' or 'b'
+
+      function evalFromEnginePerspective() {
+        const val = evaluateMaterial(chess);
+        return engineColor === 'w' ? val : -val;
       }
-    }
 
-    function getStockfishParams(rating) {
-      if (rating <= 400) return { skill: 0, depth: 1 };
-      if (rating <= 800) return { skill: 2, depth: 2 };
-      if (rating <= 1200) return { skill: 5, depth: 3 };
-      if (rating <= 1600) return { skill: 8, depth: 4 };
-      if (rating <= 2000) return { skill: 12, depth: 8 };
-      if (rating <= 2400) return { skill: 16, depth: 12 };
-      return { skill: 20, depth: 20 };
-    }
+      function minimax(depth, alpha, beta, isMaximizing) {
+        nodes++;
+        if (depth === 0) {
+          return evalFromEnginePerspective();
+        }
+        if (chess.game_over()) {
+          if (chess.in_checkmate()) {
+            // if side to move is checkmated -> bad for side to move
+            return isMaximizing ? -100000 : 100000;
+          }
+          return 0;
+        }
 
-    function computerMove() {
-      const { skill, depth } = getStockfishParams(botRating);
-      const fen = game.fen();
-      stockfish.postMessage("setoption name Skill Level value " + skill);
-      stockfish.postMessage("position fen " + fen);
-      stockfish.postMessage("go depth " + depth);
-    }
+        const movesLocal = chess.moves({ verbose:true });
+        // prefer captures/promotions
+        movesLocal.sort((a,b) => {
+          const va = a.captured ? (PIECE_VALUES[a.captured] || 0) : 0;
+          const vb = b.captured ? (PIECE_VALUES[b.captured] || 0) : 0;
+          return vb - va;
+        });
 
-    stockfish.onmessage = function(event) {
-      const line = event.data;
-      if (line.startsWith("bestmove")) {
-        const move = line.split(" ")[1];
-        if (move === "(none)") return;
-        game.move({ from: move.substring(0,2), to: move.substring(2,4), promotion: "q" });
-        drawBoard();
+        if (isMaximizing) {
+          let maxEval = -Infinity;
+          for (let m of movesLocal) {
+            chess.move({ from: m.from, to: m.to, promotion: m.promotion || 'q' });
+            const v = minimax(depth - 1, alpha, beta, false);
+            chess.undo();
+            if (v > maxEval) maxEval = v;
+            if (v > alpha) alpha = v;
+            if (beta <= alpha) break;
+          }
+          return maxEval;
+        } else {
+          let minEval = Infinity;
+          for (let m of movesLocal) {
+            chess.move({ from: m.from, to: m.to, promotion: m.promotion || 'q' });
+            const v = minimax(depth - 1, alpha, beta, true);
+            chess.undo();
+            if (v < minEval) minEval = v;
+            if (v < beta) beta = v;
+            if (beta <= alpha) break;
+          }
+          return minEval;
+        }
       }
-    };
 
-    boardDiv.addEventListener("click", (e) => {
-      const row = e.target.dataset.row;
-      const col = e.target.dataset.col;
-      if (row === undefined) return;
-      const square = "abcdefgh"[col] + (8 - row);
-      if (!selectedSquare) {
-        selectedSquare = square;
+      // top-level search
+      let bestVal = -Infinity;
+      let bestMove = null;
+      const depth = params.depth;
+      // search each candidate move (moves is already ordered)
+      for (let m of moves) {
+        chess.move({ from: m.from, to: m.to, promotion: m.promotion || 'q' });
+        const val = minimax(depth - 1, -Infinity, Infinity, false);
+        chess.undo();
+        if (val > bestVal) {
+          bestVal = val;
+          bestMove = m;
+        }
+      }
+
+      if (!bestMove) {
+        // fallback to random legal
+        const mv = moves[Math.floor(Math.random()*moves.length)];
+        postMessage({ bestMove: mv.from + mv.to + (mv.promotion || ''), nodes });
       } else {
-        playerMove(selectedSquare, square);
-        selectedSquare = null;
+        postMessage({ bestMove: bestMove.from + bestMove.to + (bestMove.promotion || ''), nodes });
       }
-    });
 
-    drawBoard();
-  </script>
+    }
+  };
+  `;
+
+  const blob = new Blob([code], { type: 'application/javascript' });
+  const url = URL.createObjectURL(blob);
+  const worker = new Worker(url);
+  return worker;
+}
+
+// start or restart engine
+function ensureEngine() {
+  if (engineWorker) return;
+  engineWorker = createEngineWorker();
+  engineWorker.onmessage = function(e) {
+    const d = e.data;
+    thinkingEl.textContent = '';
+    if (d && d.bestMove) {
+      applyEngineMove(d.bestMove);
+      statusEl.textContent = 'Engine moved (' + (d.nodes ? d.nodes + ' nodes' : '') + ')';
+    } else {
+      statusEl.textContent = 'Engine had no move';
+    }
+  };
+  engineWorker.onerror = function(err) {
+    thinkingEl.textContent = '';
+    console.error('Engine worker error', err);
+    statusEl.textContent = 'Engine error (see console)';
+  };
+}
+
+// run engine: send fen and rating
+function runEngine() {
+  ensureEngine();
+  const fen = game.fen();
+  const rating = parseInt(botSelect.value, 10);
+  thinkingEl.textContent = 'Engine thinking...';
+  engineWorker.postMessage({ cmd: 'go', fen, rating });
+}
+
+// new game
+function newGame() {
+  game.reset();
+  // set player color from radio
+  const sideRadio = document.querySelector('input[name="side"]:checked');
+  playerColor = sideRadio ? sideRadio.value : 'w';
+  orientationWhite = (playerColor === 'w'); // default orientation: player at bottom
+  selectedSquare = null;
+  clearHighlights();
+  drawBoard();
+  statusEl.textContent = 'New game — you are playing ' + (playerColor === 'w' ? 'White' : 'Black') + '.';
+  // if player chose black, engine (white) plays first
+  if (game.turn() !== playerColor) {
+    runEngine();
+  }
+}
+
+// Undo one ply (useful)
+function undoOnePly() {
+  if (game.history().length === 0) return;
+  game.undo(); // undo last ply (might be engine or player)
+  drawBoard();
+  statusEl.textContent = 'Undid 1 ply';
+}
+
+// resign
+function resign() {
+  const winner = playerColor === 'w' ? 'Black (engine)' : 'White (engine)';
+  statusEl.textContent = 'You resigned. Winner: ' + winner;
+  thinkingEl.textContent = '';
+  // disable further moves by making a special state: set game to over by forcing moves empty
+  // simpler: just reset and show message
+  // Alternatively offer new game
+}
+
+// Flip board orientation
+function flipBoard() {
+  orientationWhite = !orientationWhite;
+  drawBoard();
+}
+
+newBtn.addEventListener('click', newGame);
+flipBtn.addEventListener('click', () => { flipBoard(); });
+undoBtn.addEventListener('click', () => { undoOnePly(); });
+resignBtn.addEventListener('click', () => { resign(); });
+
+// initialize
+createBoardElements();
+ensureEngine();
+newGame();
+
+</script>
 </body>
 </html>
